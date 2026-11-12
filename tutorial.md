@@ -22,7 +22,7 @@ This tutorial explains, step by step, how this website was built: what each tech
 
 ## 1. What we built
 
-A single-page personal website, built from a LinkedIn profile export (`profile.pdf`), with these sections, top to bottom:
+A single-page personal website for Rohit Nair, live at [portfolio.rnair.dev](https://portfolio.rnair.dev/). Its content comes from a LinkedIn profile export and two resumes (kept locally in the gitignored `profile/` folder), with these sections, top to bottom:
 
 | Section | What it shows |
 | --- | --- |
@@ -31,16 +31,18 @@ A single-page personal website, built from a LinkedIn profile export (`profile.p
 | **About** | Summary paragraphs, skills, and spoken languages |
 | **Career journey** | A vertical timeline of every job, plus education |
 | **Portfolio** | Three "coming soon" cards reserved for future case studies |
-| **Contact** | Email, LinkedIn, and phone cards |
+| **Contact** | Email, LinkedIn, GitHub, and phone cards |
 | **Footer** | Name and copyright |
 | **Digital Twin** | A floating AI chat window that answers questions about the career |
 
 The design brief was **"Enterprise meets edgy"**: calm, professional structure (grids, thin lines, lots of whitespace) combined with bold typography, a dark cinematic hero, and a teal "signal" accent color.
 
-The project was built in two rounds:
+The project was built in four rounds:
 
 1. **The static website:** every section above except the chat.
 2. **The Digital Twin:** an AI chatbot, powered by OpenRouter and the `openai/gpt-oss-120b` model, that speaks as Rohit's "twin" and answers only from his profile.
+3. **A content pass:** the profile was rewritten from the LinkedIn export *and* the resumes, with conflicts resolved in favor of the resume and every claim traceable to a source (see [section 6.1](#61-srcdataprofilets-the-single-source-of-truth)).
+4. **Deployment and versioning:** the site ships as a Docker image to Azure Container Apps, and each release is tracked by version number, git tag, and a release log (see [section 7.1](#71-deploying-and-versioning)).
 
 ---
 
@@ -141,9 +143,17 @@ A good rule: **start as a server component, and only add `"use client"` when you
 
 ```text
 Site/
-├── .env                        ← secret API key (never committed to git)
-├── profile.pdf                 ← the LinkedIn export the content came from
-├── package.json                ← project name, scripts, and dependencies
+├── .env                        ← secret API key (gitignored, never committed)
+├── profile/                    ← LinkedIn export and resumes (gitignored: personal data)
+├── package.json                ← scripts, dependencies, and the release version
+├── next.config.ts              ← sets output: "standalone" for the Docker build
+├── Dockerfile                  ← builds the production image
+├── Deployment.md               ← how the site is hosted and updated (Azure)
+├── RELEASES.md                 ← log of every released version
+├── README.md                   ← short project overview and live link
+├── AGENTS.md / CLAUDE.md       ← guides for AI coding assistants working on the repo
+├── scripts/
+│   └── release.ps1             ← build, push, deploy, tag, and log a release
 ├── public/
 │   └── hero-infrastructure.png ← the hero background photo
 └── src/
@@ -152,15 +162,17 @@ Site/
     │   ├── page.tsx            ← the home page: stacks all the sections
     │   ├── globals.css         ← design tokens (colors, fonts) and custom animations
     │   └── api/
-    │       └── chat/
-    │           └── route.ts    ← the back-end endpoint the chat talks to
+    │       ├── chat/
+    │       │   └── route.ts    ← the back-end endpoint the chat talks to
+    │       └── health/
+    │           └── route.ts    ← returns {"ok":true}; used to check the deployment
     ├── components/
     │   ├── Nav.tsx             ← top navigation bar
     │   ├── Hero.tsx            ← full-screen intro
     │   ├── About.tsx           ← summary, skills, languages
     │   ├── Journey.tsx         ← career timeline and education
     │   ├── Portfolio.tsx       ← "coming soon" project cards
-    │   ├── Contact.tsx         ← contact cards
+    │   ├── Contact.tsx         ← contact cards (email, LinkedIn, GitHub, phone)
     │   ├── Footer.tsx          ← page footer
     │   ├── Reveal.tsx          ← reusable "fade in when scrolled into view" wrapper
     │   ├── DigitalTwin.tsx     ← the AI chat window
@@ -184,7 +196,7 @@ Site/
 
 ### 5.1 What happened, in order
 
-1. **Read the LinkedIn PDF** and pulled out name, headline, summary, skills, languages, every job, and education.
+1. **Read the LinkedIn PDF** and pulled out name, headline, summary, skills, languages, every job, and education. (Later, two resumes were added as a second source.)
 2. **Created a Next.js app** with `create-next-app` (TypeScript, Tailwind, App Router, `src/` folder).
 3. **Moved all content into `src/data/profile.ts`** so components only handle layout.
 4. **Built a design system** in `globals.css`: a color palette, two fonts, and reusable animations.
@@ -194,6 +206,8 @@ Site/
 8. **Verified in a real browser** at desktop and phone sizes, and fixed a low-contrast button.
 9. **Added the Digital Twin:** a server route (`/api/chat`), a prompt builder, and a chat UI.
 10. **Tested the chat**: accurate answers, honest "I don't know" answers, and a fix for two bugs found along the way.
+11. **Rewrote the content from the resumes** and fixed the invented bullets the first version contained, adding a GitHub link along the way.
+12. **Packaged and deployed** the site as a Docker image on Azure Container Apps, then added version tracking (git tags, `RELEASES.md`, and a release script).
 
 ### 5.2 How a page load works
 
@@ -240,11 +254,14 @@ export const profile = {
   name: "Rohit Nair",
   monogram: "RN",
   title: "Software Engineer",
+  headline: "Software Engineer | Scalable backend services, cloud infrastructure, AWS | ...",
   location: "Floral Park, New York",
   email: "rohitmohanihm@gmail.com",
   linkedin: "https://www.linkedin.com/in/rnair8",
+  github: "https://github.com/rnair86",
   summary: [ /* three paragraphs */ ],
-  topSkills: ["Software Engineering", "Cloud Infrastructure", "AWS", /* ... */],
+  topSkills: ["Cloud Infrastructure", "AWS", "Terraform", "Kubernetes (EKS)", /* ... */],
+  earlierRoles: [ /* the Walmart role, used only by the chat */ ],
   // ...
 } as const;
 ```
@@ -280,6 +297,10 @@ export const experiences: Experience[] = [
 
 If you forget `location` on a job, TypeScript shows an error before you ever open the browser. That's the main benefit of types.
 
+**Where the content comes from.** LinkedIn and the resumes sometimes disagree (a job title, an end date, a location). The rule used here: **never invent a third version.** Where they conflicted, the resume wording was used, and every bullet is a tightened version of something one of the sources actually says. `highlights` can be an empty array when a role has no sourced bullets; placeholder achievements are not allowed. One known soft spot: the sources do not say which Cardlytics bullets belong to *Software Engineer II* versus *III*, so the split between those two entries is the author's judgment and worth confirming.
+
+The current entry, "Independent Professional Development" (Jan 2026 – present), is marked `current: true` and is deliberately labeled as study, not employment, so the Digital Twin doesn't describe it as a job.
+
 > **Beginner takeaway:** keeping content in data files means non-designers can update the site safely, and the same data can feed more than one feature. Here it feeds both the web page *and* the AI's knowledge.
 
 ---
@@ -307,6 +328,7 @@ const ibmPlex = IBM_Plex_Sans({
 export const metadata: Metadata = {
   title: "Rohit Nair — Software Engineer",
   description: "Software engineer specializing in scalable backend services...",
+  openGraph: { /* title, description, and type: used for link previews */ },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
@@ -532,9 +554,9 @@ The headline uses **fluid type**, which scales smoothly with the screen width:
 
 ```tsx
 <h1 className="animate-rise font-display text-[clamp(2.75rem,8vw,5.75rem)] font-extrabold ...">
-  Enterprise systems.
+  Resilient backends.
   <br />
-  <span className="text-white/80">Edgy execution.</span>
+  <span className="text-white/80">Cloud to payments.</span>
 </h1>
 ```
 
@@ -707,11 +729,14 @@ These follow the same patterns, so here are just the highlights.
 ```tsx
 <a href={`mailto:${profile.email}`}>...</a>                    {/* opens the email app */}
 <a href={profile.linkedin} target="_blank" rel="noopener noreferrer">...</a>
+<a href={profile.github} target="_blank" rel="noopener noreferrer">...</a>
 <a href={`tel:+1${profile.phone.replace(/\D/g, "")}`}>...</a>  {/* taps to call on phones */}
 ```
 
 - **`target="_blank"`** opens the link in a new tab. **`rel="noopener noreferrer"`** is a security best practice whenever you do that.
 - **`.replace(/\D/g, "")`** is a *regular expression* that strips everything that isn't a digit, turning `347-497-0384` into `3474970384` for the `tel:` link.
+
+The four contact cards sit in a two-column grid (`sm:grid-cols-2`). GitHub is also linked from the nav bar, in both the desktop bar and the mobile menu.
 
 **Footer** computes the year automatically, so the copyright never goes stale:
 
@@ -927,6 +952,7 @@ const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const MODEL = "openai/gpt-oss-120b";
 const MAX_MESSAGES = 20;
 const MAX_CHARS = 2000;
+const UPSTREAM_TIMEOUT_MS = 30_000;
 ```
 
 Named constants at the top make the settings easy to find and change.
@@ -992,7 +1018,7 @@ const upstream = await fetch(OPENROUTER_URL, {
       ...messages.slice(-MAX_MESSAGES),
     ],
   }),
-  signal: request.signal,
+  signal: AbortSignal.any([request.signal, AbortSignal.timeout(UPSTREAM_TIMEOUT_MS)]),
 });
 ```
 
@@ -1007,7 +1033,7 @@ const upstream = await fetch(OPENROUTER_URL, {
 | `reasoning: { effort: "low", exclude: true }` | `gpt-oss-120b` "thinks" before answering. Low effort keeps replies fast, and `exclude` keeps that internal thinking out of the reply. |
 | `system` message | The hidden instructions plus the full profile, placed first |
 | `messages.slice(-MAX_MESSAGES)` | Only the last 20 messages, which limits cost on long chats |
-| `signal: request.signal` | If the visitor closes the page, the OpenRouter call is cancelled too |
+| `signal: AbortSignal.any([...])` | Cancels the OpenRouter call if the visitor closes the page **or** 30 seconds pass, so a hung upstream can't hang the request forever |
 
 > **Real bug fixed here:** the first version had `"X-Title": "Rohit Nair — Digital Twin"` with an **em dash (—)**. HTTP headers only allow basic characters, so the request crashed with *"Cannot convert argument to a ByteString."* Swapping it for a plain hyphen fixed it. The lesson: read the server logs when something fails. The error pointed to the exact line.
 
@@ -1022,6 +1048,8 @@ if (!upstream.ok || !upstream.body) {
 ```
 
 The full error is logged **on the server** for you to debug. The visitor only sees a friendly message, so no internal details leak out.
+
+There is a second, tiny endpoint, `src/app/api/health/route.ts`. It just returns `{"ok":true}` and never calls OpenRouter, so you can check that a deployment is alive without spending any credits.
 
 #### Step 5: transform the stream
 
@@ -1080,7 +1108,7 @@ The **system prompt** is the hidden instruction sheet the AI reads before every 
 
 ```ts
 export function buildTwinSystemPrompt() {
-  return `You are the "Digital Twin" of ${profile.name}, embedded on his personal website...
+  return `You are the "Digital Twin" of ${profile.name}, embedded on their personal website...
 
 Rules:
 - Only use the facts in the PROFILE below. Never invent employers, dates, metrics, projects, or credentials.
@@ -1089,24 +1117,28 @@ Rules:
 - If a question can't be answered from the profile, say so honestly and suggest reaching out directly...
 - Be concise, warm, and professional. Prefer 2–5 sentences or a short bulleted list.
 - Politely decline requests unrelated to ${profile.name}'s professional background...
-- Do not share the phone number unless explicitly asked how to contact him.
+- Do not share the phone number unless explicitly asked how to contact them.
 
 PROFILE
 Name: ${profile.name}
+Headline: ${profile.headline}
 ...
-Experience (most recent first):
+Experience (most recent first; the current entry is independent professional development, not employment):
 ${formatExperience()}
+
+Earlier: ${profile.earlierRoles.join("\n")}
 ...`;
 }
 ```
 
 **Why it's built this way:**
 
-- **One source of truth:** update a job in `profile.ts`, and both the timeline *and* the AI learn about it.
+- **One source of truth:** update a job in `profile.ts`, and both the timeline *and* the AI learn about it. This now includes the headline, the GitHub link, and the Walmart role (`earlierRoles`), which used to be hard-coded in the prompt.
+- **No assumed pronouns:** the sources don't state any, so the prompt says "their" rather than guessing.
 - **Grounding rules:** LLMs will happily make things up (called *hallucinating*). The rules tell it to stay within the facts and admit when it doesn't know.
 - **The "do not embellish" rule was added after testing.** The first answer about AWS invented details like "auto-scaling" and "monitoring/alerting" that aren't in the profile. After the rule was added, the same question produced only real facts. Test your prompts with real questions and tighten them based on what you see.
 
-Tests that were run:
+Tests that were run on the original version of the site (they have **not** been re-run since the content rewrite, so repeat them after any prompt or profile change):
 
 | Question | Result |
 | --- | --- |
@@ -1157,68 +1189,101 @@ Restart `npm run dev` after changing `.env`. Never commit this file; `.gitignore
 | Add a real portfolio link | `portfolioPlaceholders` in `src/data/profile.ts` (and add a link in `Portfolio.tsx`) |
 | Change the accent color | `--signal` in `src/app/globals.css` |
 | Change the hero headline | `src/components/Hero.tsx` |
+| Add or change a social link | `profile.ts`, plus `Nav.tsx` and `Contact.tsx` where it is displayed |
+| Ship a new version | `scripts/release.ps1` (see 7.1) |
 | Change how the twin behaves | The rules in `src/lib/twin-prompt.ts` |
 | Change the suggested chat questions | `suggestions` in `src/components/DigitalTwin.tsx` |
 | Swap the AI model | `MODEL` in `src/app/api/chat/route.ts` |
+
+### 7.1 Deploying and versioning
+
+The site runs as a **Docker container** on **Azure Container Apps**. A Docker **image** is a packaged copy of the built site; each image is stored on Docker Hub under a **tag** (`docker.io/rnair86/portfolio:2`), and Azure is told which tag to run. The full procedure, including the domain and secrets setup, is in `Deployment.md`.
+
+Three details make this work:
+
+- `next.config.ts` sets `output: "standalone"`, so the build produces a small self-contained server, and the `Dockerfile` copies just that into the final image.
+- `OPENROUTER_API_KEY` is **not** in the image. It is stored as an Azure secret and handed to the running container, and `.dockerignore` keeps `.env` and the personal PDFs out of the build.
+- `/api/health` lets you confirm a new version is up.
+
+**Version tracking.** The version is the major number in `package.json` (`2.0.0` means image tag `2` and git tag `v2`). `RELEASES.md` records each release's date, git commit, image digest, and Azure revision, so any version can be traced to the exact code behind it. To ship an update:
+
+```powershell
+npm version major --no-git-tag-version
+git commit -am "Bump version"
+.\scripts\release.ps1 "one-line change summary"
+```
+
+The script refuses to run with uncommitted changes or a version that already exists, then lints, builds, pushes, deploys, tags git, and appends the log row (add `-DryRun` to preview). To roll back, point Azure at an earlier tag.
 
 ---
 
 ## 8. Self-review: how the code could be improved
 
-A candid review of the finished code, ordered roughly by importance.
+A candid review of the code as it stands now. Items marked **Done** were raised in the first version of this review and have since been fixed; everything else is still open. Ordered roughly by importance.
 
 ### 8.1 Content accuracy (most important)
 
-**Some content isn't from the LinkedIn profile.** The PDF lists **no bullet points** for *Software Engineer II at Cardlytics*, but `profile.ts` contains two invented highlights for that role:
-
-```ts
-highlights: [
-  "Grew into senior backend ownership across campaign and publishing systems.",
-  "Strengthened service reliability and delivery practices across distributed teams.",
-],
-```
-
-The portfolio card descriptions are also placeholder copy. This matters twice over: visitors read it as fact, **and** the Digital Twin is told to treat everything in `profile.ts` as fact, so it repeats these lines confidently. **Fix:** replace them with real accomplishments, or remove the bullets for that role. The two early Micro Merchant roles were also merged into one timeline entry for brevity; split them if you want an exact match with LinkedIn.
+- **Done: invented bullets removed.** The first version had two made-up highlights on *Software Engineer II at Cardlytics* (for example "Grew into senior backend ownership...") that the LinkedIn profile never mentioned. Because the Digital Twin treats `profile.ts` as fact, it repeated them confidently. The profile was rewritten from LinkedIn plus two resumes, every bullet is sourced, and conflicts follow the resume.
+- **Done: the two early Micro Merchant roles** are one entry again, matching the resume ("Junior Programmer / QA Analyst", Mar 2011 – Aug 2013).
+- **Still open: the Cardlytics II / III split.** Neither source says which bullets belong to which title, so the division is the author's judgment. Confirm it, or merge the two entries the way the resume does.
+- **Still open: portfolio cards are placeholders.** The blurbs now describe work Rohit really did (AWS migration, EMV terminals, campaign publishing) and every card says "Coming soon", but a section of empty cards can read as unfinished to a recruiter. Replace them with real case studies or links when they exist, or shorten the section until then.
+- **Still open: the "15+ years" in About** is hand-written. It is correct today (first software job: March 2011), but it will drift. Compute it from the earliest start date instead.
+- **Still open: the Dean's List note** (Spring 2010 and 2011) is in the resume but not on the site, because the education entries have no field for it.
 
 ### 8.2 Security and cost
 
-- **No rate limiting on `/api/chat`.** Anyone who finds the endpoint can call it in a loop and use up your OpenRouter credits. Before deploying publicly, add per-IP rate limiting (for example with a service like Upstash), and set a spending limit in the OpenRouter dashboard.
-- **No request timeout.** If OpenRouter hangs, the request hangs too. Combine `AbortSignal.timeout(30_000)` with the existing signal.
-- **Publishing the phone number.** It's shown on the page and sits in the AI's prompt. Consider removing it from the public site and keeping email and LinkedIn as the contact routes.
+- **Done: request timeout.** The OpenRouter call now aborts after 30 seconds (`AbortSignal.any` with `AbortSignal.timeout`).
+- **Still open: no rate limiting on `/api/chat`.** Anyone who finds the endpoint can call it in a loop and use up OpenRouter credits, and the site is now public. Add per-IP rate limiting (for example with a service like Upstash), and set a spending limit in the OpenRouter dashboard.
+- **Still open: the phone number** is shown on the page and sits in the AI's prompt (with an instruction to share it only when asked). Since this is a public, recruiter-facing site, consider showing only email, LinkedIn, and GitHub.
+- **Still open: the Docker Hub repository is public.** That is fine for the image (no secrets inside), but the image contains the site's content, so treat it as public.
 
 ### 8.3 Chat robustness
 
 - **Mid-stream failures are silent.** If the connection drops halfway through, the visitor sees a truncated answer with no warning. The server could send an end marker, or the client could flag unexpectedly short replies.
-- **Home-made Markdown parsing.** `renderInline` handles only bold, italics, and dashes. Numbered lists, links, and headings show up as raw symbols. Use a library such as `react-markdown` (which is also safe by default).
-- **Array index used as React `key`** for messages (`key={i}`). It works here because messages are only ever appended, but giving each message an `id` (for example `crypto.randomUUID()`) is the more robust habit.
+- **Home-made Markdown parsing.** `renderInline` handles only bold, italics, and dashes. Numbered lists, links, and headings show up as raw symbols. Use a library such as `react-markdown` (also safe by default).
+- **Array index used as React `key`** for messages (`key={i}`). It works because messages are only appended, but giving each message an `id` (for example `crypto.randomUUID()`) is the more robust habit.
 - **No persistence.** Refreshing the page loses the conversation. Saving it in `sessionStorage` would fix that.
+- **The prompt tests are stale.** The questions in section 6.14 were run before the content rewrite. Re-run them (a question the sources answer, a false employer, and an unanswerable question) after every profile or prompt change.
 
 ### 8.4 Accessibility
 
+None of these have been addressed yet.
+
 - **The chat dialog isn't fully accessible.** It needs `aria-modal`, the **Escape** key to close, focus kept inside the panel while open, and focus returned to the button on close.
 - **Streaming text isn't announced.** Screen-reader users won't hear replies arrive. Add `aria-live="polite"` to the message area.
-- **Motion preferences are ignored.** Some people get motion sickness from animation. Wrap the animations in `@media (prefers-reduced-motion: no-preference)` so visitors who've asked their OS for reduced motion get a still page.
-- **Content depends on JavaScript.** `.reveal` starts at `opacity: 0`, so if JavaScript fails to load, those sections stay invisible. A `<noscript>` style override, or hiding content only once JavaScript is confirmed running, would fix that.
+- **Motion preferences are ignored.** There is no `prefers-reduced-motion` handling, so visitors who asked their OS for less motion still get every animation. Wrap the animations in `@media (prefers-reduced-motion: no-preference)`.
+- **Content depends on JavaScript.** `.reveal` starts at `opacity: 0`, so if JavaScript fails to load, those sections stay invisible. A `<noscript>` style override, or hiding content only once JavaScript is confirmed running, would fix that. This matters more now that recruiters and crawlers will visit.
 
 ### 8.5 Code organization
 
-- **Some facts are hard-coded in the prompt** instead of coming from `profile.ts`: the Walmart role and the long headline string. Move them into `profile.ts` so there really is one source of truth.
-- **Portfolio items have no `url` field.** Add `url?: string` to the data and render a real link when it's present, so launching a case study becomes a one-line data change.
-- **Duplicated card styles** in `Contact.tsx` (three near-identical `<a>` blocks) could become a small `ContactCard` component.
-- **The `Reveal` delay logic** (`delay === 1 ? ... : delay === 2 ? ...`) could be a simple lookup object: `{1: "reveal-delay-1", 2: "reveal-delay-2", 3: "reveal-delay-3"}[delay]`.
+- **Done: the prompt reads only `profile.ts`.** The Walmart role and the long headline moved into `profile.ts` (`earlierRoles`, `headline`), so there is one source of truth.
+- **Still open: portfolio items have no `url` field.** Add `url?: string` to the data and render a real link when it is present, so launching a case study becomes a one-line data change.
+- **Still open: duplicated card styles** in `Contact.tsx`. There are now four near-identical `<a>` blocks (email, LinkedIn, GitHub, phone), which makes a small `ContactCard` component more worthwhile than before. The LinkedIn and GitHub links are also repeated in `Nav.tsx`.
+- **Still open: the `Reveal` delay logic** (`delay === 1 ? ... : delay === 2 ? ...`) could be a simple lookup object.
+- **Still open: hard-coded copy outside `profile.ts`.** The hero headline, the About and Journey headlines, the Contact paragraph, the chat greeting, and the chat's suggested questions are written in the components. That is intentional (they are voice, not facts), but they must be updated by hand when the career story changes.
+- **Still open: `README.md` and `Deployment.md` repeat some facts** (live URL, names), so they can drift apart.
 
-### 8.6 Testing and quality
+### 8.6 Deployment and release process
+
+- **Done: version tracking.** Releases now have a version number, a git tag, and a `RELEASES.md` row, and `scripts/release.ps1` automates the build, push, and deploy.
+- **Still open: the release script has not run a real release yet.** Its `-DryRun` mode was checked, but the first real run (version 3) will be its true test. It also leaves the new `RELEASES.md` row uncommitted, by design.
+- **Still open: there is no automated pipeline.** Builds run from the developer's machine. A CI workflow that builds and deploys on a version tag would remove the manual steps, but needs a git remote and stored secrets.
+- **Still open: version 1 is untracked.** It predates git, so it cannot be rebuilt from source.
+- **Still open: the image tag is a bare number** (`:2`). The script also pushes a `:N-<sha>` tag for traceability, but only from the next release onward.
+
+### 8.7 Testing and quality
 
 - **No automated tests.** Good first candidates:
   - Unit tests for `isValidMessages` and the SSE parsing in `route.ts`.
   - A snapshot test for `buildTwinSystemPrompt`.
   - An end-to-end test (Playwright) that opens the chat and checks a reply appears. The OpenRouter call can be faked so tests don't cost money.
-- **No "eval" set for the AI.** Keep a list of questions with expected answers (including trick questions like "Did you work at Google?") and re-run it whenever the prompt or model changes.
+- **No "eval" set for the AI.** Keep a list of questions with expected answers (including trick questions like "Did you work at Google?") and re-run it whenever the prompt, profile, or model changes.
+- **Verification is manual:** `npm run lint`, `npm run build`, and checking the page in a browser. That is workable for a small site, but nothing catches a regression automatically.
 
-### 8.7 Nice-to-haves
+### 8.8 Nice-to-haves
 
 - A downloadable résumé PDF button.
-- Open Graph image (`opengraph-image.tsx`) so links shared on LinkedIn show a rich preview.
+- An Open Graph image (`opengraph-image.tsx`) so links shared on LinkedIn show a rich preview. The text metadata is set, but there is no preview image.
 - A dark/light theme toggle.
 - Analytics on which chat questions visitors ask, to learn what recruiters care about.
 
@@ -1234,11 +1299,14 @@ The portfolio card descriptions are also placeholder copy. This matters twice ov
 | **Breakpoint** | A screen width where the layout changes (`sm` = 640px, `md` = 768px, `lg` = 1024px in Tailwind) |
 | **Client component** | A React component that runs in the browser (`"use client"`) |
 | **Component** | A reusable function that returns UI |
+| **Docker image / tag** | A packaged, ready-to-run copy of the app, and the label (like `2`) that identifies one version of it |
 | **Dependency list** | The array at the end of `useEffect` that controls when it re-runs |
 | **Environment variable** | A configuration value (often secret) supplied outside the code, e.g. in `.env` |
+| **Git tag** | A permanent label on one git commit, used here to mark a release (`v2`) |
 | **Hallucination** | When an AI states something false with confidence |
 | **Hydration** | The browser attaching interactivity to HTML that came from the server |
 | **JSX** | HTML-like syntax inside JavaScript/TypeScript |
+| **Azure Container Apps** | The Azure service that runs the Docker container and gives it a public URL |
 | **LLM** | Large Language Model: the AI that generates text |
 | **Props** | Inputs passed into a component |
 | **Server component** | A React component that runs only on the server and ships no JavaScript |
