@@ -197,7 +197,15 @@ Issuing the certificate takes about 5 to 20 minutes. When `bindingType` shows `S
 
 ## Pushing an update
 
-Use a new image tag for every release (`2`, `3`, and so on). A new tag guarantees Azure creates a new revision and pulls the new image. Reusing a tag such as `latest` can leave the old image running.
+The version is the major number in `package.json`, and it is the Docker tag. Releases are logged in `RELEASES.md`. To ship an update, commit your changes, bump the version, then run the release script, which lints, builds, pushes the image, deploys it, tags git, and logs the row:
+
+```powershell
+npm version major --no-git-tag-version
+git commit -am "Bump version"
+.\scriptselease.ps1 "one-line change summary"
+```
+
+Use `.\scriptselease.ps1 -DryRun` to preview the steps. The manual steps below are what the script automates. Use a new image tag for every release; reusing a tag such as `latest` can leave the old image running.
 
 ### 1. Check the change locally
 
@@ -208,10 +216,10 @@ npm run build
 
 ### 2. Build and push the new image
 
-Replace `2` with the next version number:
+Use the version from `package.json`:
 
 ```powershell
-$tag = "2"
+$tag = "<next version>"
 docker build -t docker.io/rnair86/portfolio:$tag .
 docker push docker.io/rnair86/portfolio:$tag
 ```
