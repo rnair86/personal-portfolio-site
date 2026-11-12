@@ -202,10 +202,12 @@ The version is the major number in `package.json`, and it is the Docker tag. Rel
 ```powershell
 npm version major --no-git-tag-version
 git commit -am "Bump version"
-.\scriptselease.ps1 "one-line change summary"
+.\scripts
+elease.ps1 "one-line change summary"
 ```
 
-Use `.\scriptselease.ps1 -DryRun` to preview the steps. The manual steps below are what the script automates. Use a new image tag for every release; reusing a tag such as `latest` can leave the old image running.
+Use `.\scripts
+elease.ps1 -DryRun` to preview the steps. The manual steps below are what the script automates. Use a new image tag for every release; reusing a tag such as `latest` can leave the old image running.
 
 ### 1. Check the change locally
 
@@ -285,6 +287,17 @@ az containerapp registry set `
   --password $env:DOCKERHUB_TOKEN
 ```
 
+## Chat rate limit
+
+`/api/chat` allows 10 requests per 30 minutes per IP and answers 429 after that. The counters live in the container's memory, so they reset on restart or scale-to-zero. To change the limit without a code change, set environment variables on the app (this creates a new revision):
+
+```powershell
+az containerapp update -n nair-portfolio -g rg-nair-portfolio `
+  --set-env-vars "CHAT_RATE_LIMIT=20" "CHAT_RATE_WINDOW_MINUTES=60"
+```
+
+Locally, put the same names in `.env` and restart `npm run dev`. The code is in `src/lib/rate-limit.ts`.
+
 ## Useful commands
 
 ```powershell
@@ -316,6 +329,6 @@ az containerapp hostname list -n nair-portfolio -g rg-nair-portfolio -o table
 - **Container Apps (Consumption):** scales to zero; a low-traffic site normally stays within the free monthly allowance (180,000 vCPU-seconds, 360,000 GiB-seconds, 2 million requests).
 - **Log Analytics workspace:** created with the environment. Keep retention short to avoid ingestion charges.
 - **Docker Hub:** free for a public repository.
-- **OpenRouter:** the cost that can grow. `/api/chat` has no rate limit yet, so keep a spending limit set in the OpenRouter dashboard.
+- **OpenRouter:** the cost that can grow. `/api/chat` has an in-memory per-IP limit (default 10 requests per 30 minutes; see below), but keep a spending limit set in the OpenRouter dashboard as well.
 
 Never commit `.env`, API keys, or Docker Hub tokens.

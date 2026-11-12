@@ -1233,7 +1233,7 @@ A candid review of the code as it stands now. Items marked **Done** were raised 
 ### 8.2 Security and cost
 
 - **Done: request timeout.** The OpenRouter call now aborts after 30 seconds (`AbortSignal.any` with `AbortSignal.timeout`).
-- **Still open: no rate limiting on `/api/chat`.** Anyone who finds the endpoint can call it in a loop and use up OpenRouter credits, and the site is now public. Add per-IP rate limiting (for example with a service like Upstash), and set a spending limit in the OpenRouter dashboard.
+- **Done: per-IP rate limiting on `/api/chat`.** `src/lib/rate-limit.ts` keeps a sliding window of request times per IP in memory (default 10 per 30 minutes, configurable with `CHAT_RATE_LIMIT` and `CHAT_RATE_WINDOW_MINUTES`) and the route answers 429 with a `Retry-After` header. **Limits of this approach:** the counters reset when the container restarts or scales to zero, and they are not shared between replicas, so it only works as designed while the app runs a single replica. A shared store (for example Upstash) would fix both. It also relies on the `x-forwarded-for` header from Azure's ingress. Still set a spending limit in the OpenRouter dashboard.
 - **Still open: the phone number** is shown on the page and sits in the AI's prompt (with an instruction to share it only when asked). Since this is a public, recruiter-facing site, consider showing only email, LinkedIn, and GitHub.
 - **Still open: the Docker Hub repository is public.** That is fine for the image (no secrets inside), but the image contains the site's content, so treat it as public.
 

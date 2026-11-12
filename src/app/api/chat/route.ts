@@ -1,3 +1,4 @@
+import { checkRateLimit, clientIp, rateLimitConfig } from "@/lib/rate-limit";
 import { buildTwinSystemPrompt } from "@/lib/twin-prompt";
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
@@ -24,6 +25,23 @@ function isValidMessages(value: unknown): value is ChatMessage[] {
 }
 
 export async function POST(request: Request) {
+  const rate = checkRateLimit(clientIp(request));
+  if (!rate.allowed) {
+    const minutes = Math.ceil(rate.retryAfterSeconds / 60);
+    return Response.json(
+      {
+        error: `You've reached the chat limit of ${rateLimitConfig.limit} messages per ${rateLimitConfig.windowMinutes} minutes. Please try again in about ${minutes} minute${minutes === 1 ? "" : "s"}, or reach out by email.`,
+      },
+      {
+        status: 429,
+        headers: {
+          "Retry-After": String(rate.retryAfterSeconds),
+          "Cache-Control": "no-store",
+        },
+      },
+    );
+  }
+
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
     return Response.json(
