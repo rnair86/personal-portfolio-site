@@ -8,3 +8,4 @@ To roll back, point Azure at an earlier tag (see `Deployment.md`). To see what c
 | --- | --- | --- | --- | --- | --- |
 | 1 | — | none (predates git) | — | `nair-portfolio--0000002` | First deployment |
 | 2 | 2026-11-11 | `484a737` | `sha256:864f62120ce9f99fa1407d123c1d83d1546946d8b22716a04c0e4dba745de2c9` | `nair-portfolio--0000003` | Resume-sourced profile, GitHub link |
+| 3 | 2026-11-11 | `99742b5` | `sha256:94e144bb164351db3695c143108979fb714fc285137e9446f565cfe7bb5c40d0` | `nair-portfolio--0000004` | Per-IP chat rate limit, refreshed README and tutorial |
